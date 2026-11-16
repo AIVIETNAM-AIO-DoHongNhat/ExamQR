@@ -31,6 +31,7 @@ export default async function EditExamPage({
         title: exam.title,
         durationMin: exam.durationMin,
         questions: exam.questions.map((q) => ({
+          type: q.type,
           content: q.content,
           points: q.points,
           options: q.options.map((o) => ({ content: o.content, isCorrect: o.isCorrect })),

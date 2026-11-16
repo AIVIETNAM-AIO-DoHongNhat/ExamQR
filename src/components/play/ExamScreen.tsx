@@ -3,7 +3,8 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { saveAnswer, submitExam } from "@/server/play-actions";
-import type { AnswerResult, PlayState } from "@/lib/play-types";
+import type { AnswerResult, PlayQuestion, PlayState } from "@/lib/play-types";
+import { SHORT_MAX, STATEMENT_LABELS, TYPE_LABEL, isComplete, type Response } from "@/lib/question-types";
 import { clockOffset, useServerNow } from "@/lib/use-session-channel";
 import { fmtClock } from "@/lib/format";
 import { useConfirm } from "@/components/Dialog";
@@ -16,7 +17,7 @@ type PlayView = Extract<PlayState, { kind: "play" }>;
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 export type ExamApi = {
-  save: (code: string, questionId: string, optionId: string) => Promise<AnswerResult>;
+  save: (code: string, questionId: string, response: Response) => Promise<AnswerResult>;
   submit: (code: string) => Promise<AnswerResult>;
 };
 const serverApi: ExamApi = { save: saveAnswer, submit: submitExam };
@@ -43,10 +44,10 @@ export function ExamScreen({
 
   const qs = state.questions;
   const [index, setIndex] = useState(() => {
-    const first = qs.findIndex((q) => !state.chosen[q.id]);
+    const first = qs.findIndex((q) => !isComplete(state.chosen[q.id], q.options.length));
     return first === -1 ? 0 : first;
   });
-  const [chosen, setChosen] = useState<Record<string, string>>(state.chosen);
+  const [chosen, setChosen] = useState<Record<string, Response>>(state.chosen);
   const [flags, setFlags] = useFlags(state.sessionId);
   const [view, setView] = useState<"question" | "review">(initialView);
   const [navOpen, setNavOpen] = useState(false);
@@ -56,7 +57,7 @@ export function ExamScreen({
   const [ask, dialog] = useConfirm();
 
   /* ---------- Hàng đợi lưu đáp án: gửi lần lượt, mất mạng thì thử lại ---------- */
-  const queue = useRef(new Map<string, string>());
+  const queue = useRef(new Map<string, Response>());
   const inflight = useRef<Promise<boolean> | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 
@@ -64,8 +65,8 @@ export function ExamScreen({
     setSaveStatus("saving");
     try {
       while (queue.current.size) {
-        const [qid, oid] = queue.current.entries().next().value as [string, string];
-        const r = await api.save(state.code, qid, oid);
+        const [qid, resp] = queue.current.entries().next().value as [string, Response];
+        const r = await api.save(state.code, qid, resp);
         if (!r.ok) {
           if (r.state) {
             queue.current.clear();
@@ -77,7 +78,7 @@ export function ExamScreen({
           return false;
         }
         // Chỉ bỏ khỏi hàng đợi nếu học viên chưa đổi đáp án trong lúc gửi.
-        if (queue.current.get(qid) === oid) queue.current.delete(qid);
+        if (queue.current.get(qid) === resp) queue.current.delete(qid);
       }
       setError(null);
       setSaveStatus("saved");
@@ -120,15 +121,35 @@ export function ExamScreen({
     return () => clearInterval(id);
   }, [timeUp, refresh]);
 
-  const choose = (qid: string, oid: string) => {
+  // Câu trả lời ngắn: gõ đến đâu hiện đến đó, ngừng gõ một lúc mới gửi.
+  const typing = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const latest = useRef(chosen);
+  latest.current = chosen;
+  const choose = (qid: string, resp: Response, debounceMs = 0) => {
     if (timeUp || submitting) return;
-    setChosen((c) => ({ ...c, [qid]: oid }));
-    queue.current.set(qid, oid);
-    void flush();
+    setChosen((c) => ({ ...c, [qid]: resp }));
+    clearTimeout(typing.current.get(qid));
+    const send = () => {
+      typing.current.delete(qid);
+      queue.current.set(qid, resp);
+      void flush();
+    };
+    if (debounceMs) typing.current.set(qid, setTimeout(send, debounceMs));
+    else send();
+  };
+  /** Đưa ngay vào hàng đợi các câu trả lời ngắn đang chờ ngừng gõ (khi chuyển câu, nộp bài). */
+  const flushTyping = () => {
+    for (const [qid, t] of typing.current) {
+      clearTimeout(t);
+      const r = latest.current[qid];
+      if (r) queue.current.set(qid, r);
+    }
+    typing.current.clear();
   };
 
-  const answeredCount = qs.filter((q) => chosen[q.id]).length;
-  const unanswered = qs.map((q, i) => (chosen[q.id] ? -1 : i)).filter((i) => i >= 0);
+  const done = (q: PlayQuestion) => isComplete(chosen[q.id], q.options.length);
+  const answeredCount = qs.filter(done).length;
+  const unanswered = qs.map((q, i) => (done(q) ? -1 : i)).filter((i) => i >= 0);
   const flagged = qs.map((q, i) => (flags.has(q.id) ? i : -1)).filter((i) => i >= 0);
 
   async function doSubmit() {
@@ -153,6 +174,7 @@ export function ExamScreen({
     if (!ok) return;
     setSubmitting(true);
     setError(null);
+    flushTyping();
     try {
       if (queue.current.size && !(await flush())) {
         setError("Còn đáp án chưa lưu được do mất mạng. Đồng chí kiểm tra kết nối rồi bấm nộp lại.");
@@ -205,7 +227,13 @@ export function ExamScreen({
   const remainingMs = endAt - now;
   const q = qs[index];
   const isLast = index === qs.length - 1;
-  const qSave: SaveStatus = chosen[q.id] ? (queue.current.has(q.id) ? (saveStatus === "error" ? "error" : "saving") : "saved") : "idle";
+  const pending = queue.current.has(q.id) || typing.current.has(q.id);
+  const qSave: SaveStatus = chosen[q.id] ? (pending ? (saveStatus === "error" ? "error" : "saving") : "saved") : "idle";
+  const go = (i: number) => {
+    flushTyping();
+    if (queue.current.size) void flush();
+    setIndex(i);
+  };
 
   return (
     // Bù lề trên/dưới của khung để thanh trạng thái và thanh nút sát mép.
@@ -273,6 +301,7 @@ export function ExamScreen({
                 <p className="border-2 border-ink bg-sun px-2 font-display text-[20px] font-bold leading-tight tracking-[0.04em] text-ink">
                   CÂU {index + 1}/{qs.length}
                 </p>
+                {q.type !== "SINGLE" && <span className="font-display text-[17px] font-semibold tracking-[0.04em] text-muted">{TYPE_LABEL[q.type]}</span>}
                 <SaveIndicator status={qSave} />
                 <button
                   onClick={() =>
@@ -296,50 +325,29 @@ export function ExamScreen({
               <p id={`q-${q.id}`} className="px-card mt-4 whitespace-pre-wrap px-5 py-5 text-[1.2rem] font-semibold leading-normal text-ink">
                 {q.content}
               </p>
-              <div role="radiogroup" aria-labelledby={`q-${q.id}`} className="mt-7 flex flex-col gap-3">
-                {q.options.map((o, i) => {
-                  const on = chosen[q.id] === o.id;
-                  return (
-                    <button
-                      key={o.id}
-                      role="radio"
-                      aria-checked={on}
-                      onClick={() => choose(q.id, o.id)}
-                      className={cx(
-                        "px-tile flex min-h-14 items-stretch gap-3.5 p-2 pr-4 text-left leading-relaxed transition-[background-color,border-color,transform] active:translate-y-0.5",
-                        on ? "border-accent bg-accent-soft" : "bg-white hover:bg-sun-soft",
-                      )}
-                    >
-                      <span
-                        className={cx(
-                          "grid w-10 shrink-0 place-items-center border-2 font-display text-[24px] font-bold leading-none transition-colors",
-                          on ? "border-accent bg-accent text-white" : "border-ink bg-paper text-ink",
-                        )}
-                        aria-hidden
-                      >
-                        {LETTERS[i]}
-                      </span>
-                      <span className={cx("flex-1 self-center py-1.5", on ? "font-semibold text-ink" : "text-ink")}>{o.content}</span>
-                      {on && <Check className="h-5 w-5 shrink-0 self-center text-accent" strokeWidth={3} aria-hidden />}
-                    </button>
-                  );
-                })}
-              </div>
+              <QuestionInput q={q} value={chosen[q.id]} onChange={(r, debounceMs) => choose(q.id, r, debounceMs)} />
             </motion.section>
           </AnimatePresence>
 
           <div className="sticky bottom-0 z-10 -mx-4 mt-auto border-t-[3px] border-ink bg-white px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3.5 sm:-mx-6 sm:px-6">
             <div className="flex gap-3">
-              <Button variant="secondary" size="lg" className="flex-1 px-3" disabled={index === 0} onClick={() => setIndex((i) => i - 1)}>
+              <Button variant="secondary" size="lg" className="flex-1 px-3" disabled={index === 0} onClick={() => go(index - 1)}>
                 <ChevronLeft className="h-4 w-4" aria-hidden />
                 Câu trước
               </Button>
               {isLast ? (
-                <Button size="lg" className="flex-1 px-3" onClick={() => setView("review")}>
+                <Button
+                  size="lg"
+                  className="flex-1 px-3"
+                  onClick={() => {
+                    go(index);
+                    setView("review");
+                  }}
+                >
                   Xem lại và nộp
                 </Button>
               ) : (
-                <Button size="lg" className="flex-1 px-3" onClick={() => setIndex((i) => i + 1)}>
+                <Button size="lg" className="flex-1 px-3" onClick={() => go(index + 1)}>
                   Câu sau
                   <ChevronRight className="h-4 w-4" aria-hidden />
                 </Button>
@@ -354,10 +362,10 @@ export function ExamScreen({
         onClose={() => setNavOpen(false)}
         total={qs.length}
         current={view === "question" ? index : -1}
-        isAnswered={(i) => !!chosen[qs[i].id]}
+        isAnswered={(i) => done(qs[i])}
         isFlagged={(i) => flags.has(qs[i].id)}
         onPick={(i) => {
-          setIndex(i);
+          go(i);
           setView("question");
           setNavOpen(false);
         }}
@@ -366,6 +374,102 @@ export function ExamScreen({
           setNavOpen(false);
         }}
       />
+    </div>
+  );
+}
+
+/** Phần trả lời của một câu, theo dạng câu. */
+function QuestionInput({ q, value, onChange }: { q: PlayQuestion; value: Response | undefined; onChange: (r: Response, debounceMs?: number) => void }) {
+  if (q.type === "TRUE_FALSE") {
+    const marks = value?.kind === "tf" ? value.marks : {};
+    return (
+      <div className="mt-7 flex flex-col gap-3">
+        <p className="text-[14px] text-muted">Chọn Đúng hoặc Sai cho từng nhận định.</p>
+        {q.options.map((o, i) => {
+          const m = marks[o.id];
+          return (
+            <div key={o.id} role="radiogroup" aria-labelledby={`st-${o.id}`} className={cx("px-tile flex flex-col gap-3 p-3", m === undefined ? "bg-white" : "bg-accent-soft")}>
+              <p id={`st-${o.id}`} className="flex gap-2.5 leading-relaxed text-ink">
+                <span className="font-display text-[22px] font-bold leading-[1.15] text-accent">{STATEMENT_LABELS[i]})</span>
+                <span className="flex-1">{o.content}</span>
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {([true, false] as const).map((v) => {
+                  const on = m === v;
+                  return (
+                    <button
+                      key={String(v)}
+                      role="radio"
+                      aria-checked={on}
+                      onClick={() => onChange({ kind: "tf", marks: { ...marks, [o.id]: v } })}
+                      className={cx(
+                        "flex h-12 items-center justify-center gap-2 border-2 font-display text-[22px] font-bold tracking-[0.04em] transition-[background-color,transform] active:translate-y-0.5",
+                        on ? (v ? "border-ink bg-mint text-ink" : "border-ink bg-danger text-white") : "border-ink/40 bg-white text-ink-soft hover:border-ink",
+                      )}
+                    >
+                      {on && <Check className="h-4 w-4" strokeWidth={3} aria-hidden />}
+                      {v ? "Đúng" : "Sai"}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  if (q.type === "SHORT") {
+    const text = value?.kind === "short" ? value.text : "";
+    return (
+      <div className="mt-7 flex flex-col gap-2">
+        <label htmlFor={`a-${q.id}`} className="font-display text-[20px] font-semibold tracking-[0.04em] text-ink-soft">
+          Câu trả lời của đồng chí
+        </label>
+        <textarea
+          id={`a-${q.id}`}
+          rows={3}
+          maxLength={SHORT_MAX}
+          value={text}
+          onChange={(e) => onChange({ kind: "short", text: e.target.value }, 800)}
+          placeholder="Gõ câu trả lời ngắn gọn…"
+          className="px-tile w-full resize-none bg-white px-4 py-3 text-[1.1rem] leading-relaxed text-ink outline-none placeholder:text-muted/60 focus:border-accent"
+        />
+        <p className="text-[13px] text-muted">Viết đúng chính tả, có dấu. Không phân biệt chữ hoa, chữ thường.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div role="radiogroup" aria-labelledby={`q-${q.id}`} className="mt-7 flex flex-col gap-3">
+      {q.options.map((o, i) => {
+        const on = value?.kind === "single" && value.optionId === o.id;
+        return (
+          <button
+            key={o.id}
+            role="radio"
+            aria-checked={on}
+            onClick={() => onChange({ kind: "single", optionId: o.id })}
+            className={cx(
+              "px-tile flex min-h-14 items-stretch gap-3.5 p-2 pr-4 text-left leading-relaxed transition-[background-color,border-color,transform] active:translate-y-0.5",
+              on ? "border-accent bg-accent-soft" : "bg-white hover:bg-sun-soft",
+            )}
+          >
+            <span
+              className={cx(
+                "grid w-10 shrink-0 place-items-center border-2 font-display text-[24px] font-bold leading-none transition-colors",
+                on ? "border-accent bg-accent text-white" : "border-ink bg-paper text-ink",
+              )}
+              aria-hidden
+            >
+              {LETTERS[i]}
+            </span>
+            <span className={cx("flex-1 self-center py-1.5", on ? "font-semibold text-ink" : "text-ink")}>{o.content}</span>
+            {on && <Check className="h-5 w-5 shrink-0 self-center text-accent" strokeWidth={3} aria-hidden />}
+          </button>
+        );
+      })}
     </div>
   );
 }

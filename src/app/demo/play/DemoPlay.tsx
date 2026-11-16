@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { PlayState } from "@/lib/play-types";
+import type { PlayQuestion, PlayState } from "@/lib/play-types";
+import type { Response } from "@/lib/question-types";
 import { PlayShell } from "@/components/play/PlayApp";
 import { JoinForm } from "@/components/play/JoinForm";
 import { WaitingRoom } from "@/components/play/WaitingRoom";
@@ -22,14 +23,25 @@ const QUESTIONS = [
   { q: "Nguyên tắc tổ chức cơ bản của Đảng Cộng sản Việt Nam là gì?", a: ["Tập trung dân chủ", "Tập thể lãnh đạo", "Tự phê bình và phê bình", "Đoàn kết thống nhất"] },
 ];
 
-function fakeQuestions(n: number) {
+const TF = {
+  q: "Chủ đề: Về chủ nghĩa xã hội khoa học",
+  a: [
+    "Chủ nghĩa xã hội khoa học ra đời gắn với Tuyên ngôn của Đảng Cộng sản (1848).",
+    "Chủ nghĩa xã hội khoa học chỉ là một học thuyết kinh tế thuần túy.",
+    "Theo nghĩa hẹp, chủ nghĩa xã hội khoa học là một bộ phận hợp thành chủ nghĩa Mác - Lênin.",
+    "Chủ nghĩa xã hội khoa học không còn ý nghĩa định hướng thực tiễn hiện nay.",
+  ],
+  key: [true, false, true, false],
+};
+const SHORT = { q: "Công cuộc đổi mới ở Việt Nam bắt đầu từ năm nào?", a: "1986" };
+
+/** Đề giả: phần trắc nghiệm, rồi 2 câu Đúng/Sai, cuối cùng 2 câu trả lời ngắn. */
+function fakeQuestions(n: number): PlayQuestion[] {
   return Array.from({ length: n }, (_, i) => {
+    if (i >= n - 2) return { id: `q${i}`, type: "SHORT", content: SHORT.q, options: [] };
+    if (i >= n - 4) return { id: `q${i}`, type: "TRUE_FALSE", content: TF.q, options: TF.a.map((c, j) => ({ id: `q${i}o${j}`, content: c })) };
     const src = QUESTIONS[i % QUESTIONS.length];
-    return {
-      id: `q${i}`,
-      content: src.q,
-      options: src.a.map((c, j) => ({ id: `q${i}o${j}`, content: c })),
-    };
+    return { id: `q${i}`, type: "SINGLE", content: src.q, options: src.a.map((c, j) => ({ id: `q${i}o${j}`, content: c })) };
   });
 }
 
@@ -39,8 +51,11 @@ export function DemoPlay({ view }: { view: DemoView }) {
   const playState = useMemo<Extract<PlayState, { kind: "play" }>>(() => {
     const questions = fakeQuestions(20);
     const now = Date.now();
-    const chosen: Record<string, string> = {};
-    questions.slice(0, view === "review" ? 17 : 6).forEach((q) => (chosen[q.id] = q.options[0].id));
+    const chosen: Record<string, Response> = {};
+    questions
+      .filter((q) => q.type === "SINGLE")
+      .slice(0, view === "review" ? 15 : 6)
+      .forEach((q) => (chosen[q.id] = { kind: "single", optionId: q.options[0].id }));
     return {
       kind: "play",
       ...base,
@@ -81,7 +96,7 @@ export function DemoPlay({ view }: { view: DemoView }) {
 }
 
 function resultState(): Extract<PlayState, { kind: "result" }> {
-  const qs = fakeQuestions(5);
+  const qs = fakeQuestions(10);
   return {
     kind: "result",
     ...base,
@@ -89,10 +104,22 @@ function resultState(): Extract<PlayState, { kind: "result" }> {
     correct: 17,
     total: 20,
     sessionEnded: true,
-    review: qs.map((q, i) => ({
-      content: q.content,
-      points: 1,
-      options: q.options.map((o, j) => ({ id: o.id, content: o.content, isCorrect: j === 0, chosen: i === 1 ? j === 2 : i === 3 ? false : j === 0 })),
-    })),
+    review: [
+      ...qs.slice(0, 3).map((q, i) => ({
+        type: "SINGLE" as const,
+        content: q.content,
+        points: 1,
+        credit: i === 1 ? 0 : 1,
+        options: q.options.map((o, j) => ({ id: o.id, content: o.content, isCorrect: j === 0, chosen: i === 1 ? j === 2 : j === 0 })),
+      })),
+      {
+        type: "TRUE_FALSE" as const,
+        content: TF.q,
+        points: 2,
+        credit: 0.5,
+        options: TF.a.map((c, j) => ({ id: `tf${j}`, content: c, isCorrect: TF.key[j], chosen: false, mark: j === 1 ? true : TF.key[j] })),
+      },
+      { type: "SHORT" as const, content: SHORT.q, points: 1, credit: 1, text: "1986", options: [{ id: "s0", content: SHORT.a, isCorrect: true, chosen: false }] },
+    ],
   };
 }

@@ -37,7 +37,7 @@ export async function getBoardState(sessionId: string): Promise<BoardState> {
         orderBy: { order: "asc" },
         include: { options: { orderBy: { order: "asc" } } },
       }),
-      prisma.answer.findMany({ where: { participant: { sessionId } }, select: { questionId: true, optionId: true, isCorrect: true } }),
+      prisma.answer.findMany({ where: { participant: { sessionId } }, select: { questionId: true, optionId: true, isCorrect: true, credit: true, text: true, marks: true } }),
     ]);
     hardest = hardestQuestions(questionStats(questions, answers), 3).map((q) => ({ index: q.index, content: q.content, rate: q.rate }));
   }

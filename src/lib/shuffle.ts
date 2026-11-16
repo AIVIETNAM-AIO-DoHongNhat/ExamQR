@@ -20,6 +20,22 @@ export function seededShuffle<T>(items: readonly T[], seed: number): T[] {
   return out;
 }
 
+/**
+ * Đảo câu trong từng nhóm liền nhau cùng dạng, giữ thứ tự các phần của đề
+ * (ví dụ: phần trắc nghiệm → phần Đúng/Sai → phần trả lời ngắn).
+ */
+export function shuffleWithinRuns<T>(items: readonly T[], keyOf: (x: T) => string, seed: number): T[] {
+  const out: T[] = [];
+  let start = 0;
+  for (let i = 1; i <= items.length; i++) {
+    if (i === items.length || keyOf(items[i]) !== keyOf(items[start])) {
+      out.push(...seededShuffle(items.slice(start, i), deriveSeed(seed, `run${start}`)));
+      start = i;
+    }
+  }
+  return out;
+}
+
 /** Hạt giống riêng cho từng câu, để thứ tự đáp án của các câu khác nhau. */
 export function deriveSeed(seed: number, key: string) {
   let h = (seed ^ 0x9e3779b9) >>> 0;

@@ -9,6 +9,8 @@ import { parseSbdInput } from "@/lib/sbd";
 import { newRoomCode } from "@/lib/code";
 import { requireTeacher } from "./auth";
 import { examProblems, type ExamDraft } from "@/lib/exam-validate";
+import { QUESTION_TYPES, normalizeShort } from "@/lib/question-types";
+import { rescoreParticipants } from "./grading";
 
 export async function signOut() {
   const supabase = await supabaseServer();
@@ -63,12 +65,13 @@ const draftSchema = z.object({
   questions: z
     .array(
       z.object({
+        type: z.enum(QUESTION_TYPES),
         content: z.string().max(2000),
         points: z.number().int().min(1).max(100),
         options: z
           .array(z.object({ content: z.string().max(1000), isCorrect: z.boolean() }))
-          .min(2)
-          .max(6),
+          .min(1)
+          .max(10),
       }),
     )
     .max(200),
@@ -91,6 +94,7 @@ export async function saveExam(examId: string, draft: ExamDraft) {
         questions: {
           create: d.questions.map((q, qi) => ({
             order: qi,
+            type: q.type,
             content: q.content,
             points: q.points,
             options: { create: q.options.map((o, oi) => ({ order: oi, content: o.content, isCorrect: o.isCorrect })) },
@@ -116,6 +120,7 @@ export async function duplicateExam(examId: string) {
       questions: {
         create: full.questions.map((q) => ({
           order: q.order,
+          type: q.type,
           content: q.content,
           points: q.points,
           options: { create: q.options.map((o) => ({ order: o.order, content: o.content, isCorrect: o.isCorrect })) },
@@ -205,7 +210,7 @@ export async function createSession(formData: FormData) {
   const problems = examProblems({
     title: exam.title,
     durationMin: exam.durationMin,
-    questions: exam.questions.map((q) => ({ content: q.content, points: q.points, options: q.options })),
+    questions: exam.questions.map((q) => ({ type: q.type, content: q.content, points: q.points, options: q.options })),
   });
   if (problems.length) redirect(`/exams/${exam.id}/edit?check=1`);
   if (cls._count.students === 0) redirect(`/classes/${cls.id}?empty=1`);
@@ -220,4 +225,31 @@ export async function createSession(formData: FormData) {
     }
   }
   throw new Error("Không tạo được mã phòng, hãy thử lại");
+}
+
+/* ---------------- Chấm lại câu trả lời ngắn ---------------- */
+
+/**
+ * Giảng viên chấp nhận / không chấp nhận một câu trả lời ngắn (mọi bài có cùng nội dung sau chuẩn hóa)
+ * rồi tính lại điểm các bài đã nộp.
+ */
+export async function gradeShortAnswer(sessionId: string, questionId: string, normalized: string, accept: boolean) {
+  const t = await requireTeacher();
+  const s = await prisma.session.findFirst({ where: { id: sessionId, exam: { teacherId: t.id } }, select: { id: true, examId: true } });
+  if (!s) throw new Error("Không tìm thấy buổi kiểm tra");
+  const q = await prisma.question.findFirst({ where: { id: questionId, examId: s.examId, type: "SHORT" }, select: { id: true } });
+  if (!q) throw new Error("Không tìm thấy câu hỏi");
+
+  const answers = await prisma.answer.findMany({
+    where: { questionId, participant: { sessionId } },
+    select: { id: true, text: true, participantId: true },
+  });
+  const hit = answers.filter((a) => normalizeShort(a.text ?? "") === normalized);
+  if (!hit.length) return;
+  await prisma.answer.updateMany({
+    where: { id: { in: hit.map((a) => a.id) } },
+    data: { credit: accept ? 1 : 0, isCorrect: accept },
+  });
+  await rescoreParticipants(s.examId, hit.map((a) => a.participantId));
+  revalidatePath(`/sessions/${sessionId}/report`);
 }

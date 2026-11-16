@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { PlayState } from "@/lib/play-types";
+import type { PlayState, ReviewItem } from "@/lib/play-types";
+import { STATEMENT_LABELS, TYPE_LABEL } from "@/lib/question-types";
 import { fmtScore } from "@/lib/format";
 import { PASS_SCORE } from "@/lib/stats";
 import { Check, Info, X } from "@/components/icons";
@@ -13,7 +14,7 @@ export function ResultScreen({ state }: { state: Extract<PlayState, { kind: "res
   const pass = state.score >= PASS_SCORE;
   const [onlyWrong, setOnlyWrong] = useState(false);
 
-  const items = (state.review ?? []).map((q, i) => ({ q, i, right: q.options.some((o) => o.chosen && o.isCorrect) }));
+  const items = (state.review ?? []).map((q, i) => ({ q, i, right: q.credit >= 1 }));
   const shown = onlyWrong ? items.filter((x) => !x.right) : items;
 
   return (
@@ -51,33 +52,21 @@ export function ResultScreen({ state }: { state: Extract<PlayState, { kind: "res
               <div key={i} className="px-5 py-4">
                 <div className="flex gap-3">
                   <span
-                    className={cx("mt-0.5 grid h-6 w-6 shrink-0 place-items-center border-2 border-ink", right ? "bg-mint text-ink" : "bg-danger text-white")}
-                    aria-label={right ? "Đúng" : "Sai"}
+                    className={cx(
+                      "mt-0.5 grid h-6 w-6 shrink-0 place-items-center border-2 border-ink",
+                      right ? "bg-mint text-ink" : q.credit > 0 ? "bg-sun text-ink" : "bg-danger text-white",
+                    )}
+                    aria-label={right ? "Đúng" : q.credit > 0 ? "Đúng một phần" : "Sai"}
                   >
-                    {right ? <Check className="h-3 w-3" strokeWidth={3} /> : <X className="h-3 w-3" strokeWidth={3} />}
+                    {right ? <Check className="h-3 w-3" strokeWidth={3} /> : q.credit > 0 ? <span className="text-[11px] font-bold leading-none">½</span> : <X className="h-3 w-3" strokeWidth={3} />}
                   </span>
                   <p className="leading-relaxed text-ink">
                     <span className="mr-1.5 font-display text-[19px] font-bold text-accent">Câu {i + 1}.</span>
+                    {q.type !== "SINGLE" && <span className="mr-1.5 text-[13px] font-medium text-muted">[{TYPE_LABEL[q.type]}]</span>}
                     {q.content}
                   </p>
                 </div>
-                <ul className="mt-3 flex flex-col gap-1 pl-8">
-                  {q.options.map((o, oi) => (
-                    <li
-                      key={o.id}
-                      className={cx(
-                        "flex items-start gap-2 px-2.5 py-1.5 text-[15px] leading-relaxed",
-                        o.isCorrect && "border-l-4 border-ok bg-mint-soft",
-                        o.chosen && !o.isCorrect && "border-l-4 border-danger bg-danger-soft",
-                      )}
-                    >
-                      <span className={cx("w-4 shrink-0 font-display text-[19px] font-bold leading-[1.4]", o.isCorrect ? "text-ok" : o.chosen ? "text-danger" : "text-muted")}>{LETTERS[oi]}</span>
-                      <span className={cx("flex-1", o.isCorrect ? "text-ok" : o.chosen ? "text-danger" : "text-ink-soft")}>{o.content}</span>
-                      {o.chosen && <span className="shrink-0 text-[12px] font-medium text-muted">Đồng chí chọn</span>}
-                    </li>
-                  ))}
-                </ul>
-                {!q.options.some((o) => o.chosen) && <p className="mt-2 pl-8 text-[13px] text-muted">Câu này đồng chí chưa trả lời.</p>}
+                <ReviewBody q={q} />
               </div>
             ))}
           </div>
@@ -91,5 +80,70 @@ export function ResultScreen({ state }: { state: Extract<PlayState, { kind: "res
         </div>
       )}
     </div>
+  );
+}
+
+const pts = (n: number) => (Math.round(n * 100) / 100).toLocaleString("vi-VN");
+
+function ReviewBody({ q }: { q: ReviewItem }) {
+  if (q.type === "TRUE_FALSE") {
+    const answered = q.options.some((o) => o.mark != null);
+    return (
+      <>
+        <ul className="mt-3 flex flex-col gap-1 pl-8">
+          {q.options.map((o, oi) => {
+            const right = o.mark === o.isCorrect;
+            return (
+              <li key={o.id} className={cx("flex items-start gap-2 border-l-4 px-2.5 py-1.5 text-[15px] leading-relaxed", right ? "border-ok bg-mint-soft" : "border-danger bg-danger-soft")}>
+                <span className="w-4 shrink-0 font-display text-[19px] font-bold leading-[1.4] text-muted">{STATEMENT_LABELS[oi]}</span>
+                <span className="flex-1 text-ink-soft">{o.content}</span>
+                <span className="shrink-0 text-right text-[12px] leading-snug">
+                  <span className={cx("block font-semibold", o.isCorrect ? "text-ok" : "text-danger")}>{o.isCorrect ? "Đúng" : "Sai"}</span>
+                  <span className="block text-muted">Đ/c: {o.mark == null ? "bỏ trống" : o.mark ? "Đúng" : "Sai"}</span>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+        <p className="mt-2 pl-8 text-[13px] text-muted">
+          {answered ? `Đạt ${pts(q.credit * q.points)}/${q.points} điểm câu này.` : "Câu này đồng chí chưa trả lời."}
+        </p>
+      </>
+    );
+  }
+  if (q.type === "SHORT") {
+    return (
+      <div className="mt-3 flex flex-col gap-1.5 pl-8 text-[15px] leading-relaxed">
+        <p className={cx("border-l-4 px-2.5 py-1.5", q.credit >= 1 ? "border-ok bg-mint-soft text-ok" : "border-danger bg-danger-soft text-danger")}>
+          <span className="mr-1.5 text-[12px] font-medium text-muted">Đồng chí trả lời:</span>
+          {q.text?.trim() ? q.text : <em className="not-italic text-muted">bỏ trống</em>}
+        </p>
+        <p className="px-2.5 text-ok">
+          <span className="mr-1.5 text-[12px] font-medium text-muted">Đáp án:</span>
+          {q.options.map((o) => o.content).join(" / ")}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <>
+      <ul className="mt-3 flex flex-col gap-1 pl-8">
+        {q.options.map((o, oi) => (
+          <li
+            key={o.id}
+            className={cx(
+              "flex items-start gap-2 px-2.5 py-1.5 text-[15px] leading-relaxed",
+              o.isCorrect && "border-l-4 border-ok bg-mint-soft",
+              o.chosen && !o.isCorrect && "border-l-4 border-danger bg-danger-soft",
+            )}
+          >
+            <span className={cx("w-4 shrink-0 font-display text-[19px] font-bold leading-[1.4]", o.isCorrect ? "text-ok" : o.chosen ? "text-danger" : "text-muted")}>{LETTERS[oi]}</span>
+            <span className={cx("flex-1", o.isCorrect ? "text-ok" : o.chosen ? "text-danger" : "text-ink-soft")}>{o.content}</span>
+            {o.chosen && <span className="shrink-0 text-[12px] font-medium text-muted">Đồng chí chọn</span>}
+          </li>
+        ))}
+      </ul>
+      {!q.options.some((o) => o.chosen) && <p className="mt-2 pl-8 text-[13px] text-muted">Câu này đồng chí chưa trả lời.</p>}
+    </>
   );
 }

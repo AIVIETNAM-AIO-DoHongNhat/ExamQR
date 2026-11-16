@@ -5,6 +5,8 @@ import { loadReport } from "@/server/report";
 import { brand, brandLine } from "@/lib/brand";
 import { fmtScore, fmtTime } from "@/lib/format";
 import { PASS_SCORE } from "@/lib/stats";
+import { STATEMENT_LABELS, TYPE_LABEL } from "@/lib/question-types";
+import { ShortResponses } from "./ShortResponses";
 import { PrintButton } from "@/components/PrintButton";
 import { ScoreHistogram } from "@/components/ScoreHistogram";
 import { Download } from "@/components/icons";
@@ -121,7 +123,7 @@ export default async function ReportPage({
 
         <section>
           <div className="mb-4 flex flex-wrap items-center gap-3">
-            <h2 className="font-display text-[30px] font-bold leading-none text-ink">Tỉ lệ đúng từng câu</h2>
+            <h2 className="font-display text-[30px] font-bold leading-none text-ink">Kết quả từng câu</h2>
             <div className="no-print ml-auto flex border-2 border-ink bg-white">
               {(
                 [
@@ -145,7 +147,10 @@ export default async function ReportPage({
               <div key={q.index} className="print-break-avoid px-5 py-4">
                 <div className="flex items-start gap-3">
                   <span className="w-14 shrink-0 font-display text-[20px] font-bold leading-6 text-accent">Câu {q.index}</span>
-                  <p className="flex-1 text-[15px] leading-relaxed text-ink">{q.content}</p>
+                  <p className="flex-1 text-[15px] leading-relaxed text-ink">
+                    {q.type !== "SINGLE" && <span className="mr-1.5 text-[12px] font-medium text-muted">[{TYPE_LABEL[q.type]}]</span>}
+                    {q.content}
+                  </p>
                   <span
                     className={cx(
                       "shrink-0 font-display text-[26px] font-bold leading-none tabular-nums",
@@ -155,23 +160,35 @@ export default async function ReportPage({
                     {pct(q.rate)}
                   </span>
                 </div>
-                <div className="mt-3 flex flex-col gap-1.5 pl-15">
-                  {q.options.map((o, i) => {
-                    const share = q.answered ? o.picked / q.answered : 0;
-                    return (
-                      <div key={i} className="flex items-center gap-3 text-[13px]">
-                        <span className={cx("w-3 shrink-0 font-display text-[17px] font-bold", o.isCorrect ? "text-ok" : "text-muted")}>{LETTERS[i]}</span>
-                        <div className="min-w-0 flex-1">
-                          <p className={cx("truncate", o.isCorrect ? "font-medium text-ok" : "text-ink-soft")}>{o.content}</p>
-                          <div className="mt-1 h-2 bg-paper outline-1 outline-ink/20">
-                            <div className={cx("px-meter h-full", o.isCorrect ? "bg-mint" : "bg-ink/30")} style={{ width: `${share * 100}%` }} />
+                {q.type === "SHORT" ? (
+                  <div className="mt-3 pl-15">
+                    <p className="mb-1.5 text-[13px] text-ok">Đáp án: {q.options.map((o) => o.content).join(" / ")}</p>
+                    <ShortResponses sessionId={s.id} questionId={q.id} items={q.responses} />
+                  </div>
+                ) : (
+                  <div className="mt-3 flex flex-col gap-1.5 pl-15">
+                    {q.options.map((o, i) => {
+                      const share = q.answered ? o.picked / q.answered : 0;
+                      return (
+                        <div key={i} className="flex items-center gap-3 text-[13px]">
+                          <span className={cx("w-3 shrink-0 font-display text-[17px] font-bold", q.type === "SINGLE" && o.isCorrect ? "text-ok" : "text-muted")}>
+                          {q.type === "TRUE_FALSE" ? STATEMENT_LABELS[i] : LETTERS[i]}
+                        </span>
+                          <div className="min-w-0 flex-1">
+                            <p className={cx("truncate", q.type === "SINGLE" && o.isCorrect ? "font-medium text-ok" : "text-ink-soft")}>
+                            {q.type === "TRUE_FALSE" && <b className={o.isCorrect ? "text-ok" : "text-danger"}>{o.isCorrect ? "Đ" : "S"} · </b>}
+                            {o.content}
+                          </p>
+                            <div className="mt-1 h-2 bg-paper outline-1 outline-ink/20">
+                              <div className={cx("px-meter h-full", o.isCorrect || q.type === "TRUE_FALSE" ? "bg-mint" : "bg-ink/30")} style={{ width: `${share * 100}%` }} />
+                            </div>
                           </div>
+                          <span className="w-6 shrink-0 text-right tabular-nums text-muted">{o.picked}</span>
                         </div>
-                        <span className="w-6 shrink-0 text-right tabular-nums text-muted">{o.picked}</span>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             ))}
           </div>

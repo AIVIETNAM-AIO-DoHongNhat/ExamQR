@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { missingEnv } from "@/lib/env";
 import { getTeacher } from "@/server/auth";
 import { loadReport } from "@/server/report";
+import { TYPE_LABEL } from "@/lib/question-types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +25,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     { header: "SBD", key: "sbd", width: 12 },
     { header: "Trạng thái", key: "status", width: 12 },
     { header: "Số câu đã làm", key: "answered", width: 14 },
-    { header: "Số câu đúng", key: "correct", width: 12 },
+    { header: "Số câu đúng hoàn toàn", key: "correct", width: 20 },
     { header: "Điểm (thang 10)", key: "score", width: 15 },
     { header: "Thời gian làm (phút)", key: "minutes", width: 18 },
   ];
@@ -48,13 +49,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const qs = wb.addWorksheet("Thống kê câu hỏi");
   qs.columns = [
     { header: "Câu", key: "i", width: 6 },
+    { header: "Dạng", key: "type", width: 14 },
     { header: "Nội dung", key: "content", width: 70 },
     { header: "Số người trả lời", key: "answered", width: 16 },
-    { header: "Số người đúng", key: "correct", width: 14 },
-    { header: "Tỉ lệ đúng", key: "rate", width: 12 },
+    { header: "Số người đúng hoàn toàn", key: "correct", width: 22 },
+    { header: "Tỉ lệ điểm đạt", key: "rate", width: 14 },
   ];
   for (const q of r.questions) {
-    qs.addRow({ i: q.index, content: q.content, answered: q.answered, correct: q.correct, rate: q.rate });
+    qs.addRow({ i: q.index, type: TYPE_LABEL[q.type], content: q.content, answered: q.answered, correct: q.correct, rate: q.rate });
   }
   qs.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
   qs.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1B1A18" } };

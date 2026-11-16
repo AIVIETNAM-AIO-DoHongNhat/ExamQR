@@ -1,13 +1,19 @@
 import { compareSbd } from "./sbd";
+import { creditOf, normalizeShort, type QuestionType } from "./question-types";
 
 /** Ngưỡng đạt và ngưỡng biểu dương trên thang 10. */
 export const PASS_SCORE = 5;
 export const HONOR_SCORE = 9;
 
-type QInput = { id: string; content: string; options: { id: string; content: string; isCorrect: boolean }[] };
-type AInput = { questionId: string; optionId: string; isCorrect: boolean };
+type QInput = { id: string; type: QuestionType; content: string; options: { id: string; content: string; isCorrect: boolean }[] };
+type AInput = { questionId: string; optionId: string | null; isCorrect: boolean; credit: number | null; text?: string | null; marks?: unknown };
 
-/** Tỉ lệ đúng và số người chọn từng phương án của mỗi câu (theo thứ tự đề gốc). */
+/**
+ * Thống kê từng câu (theo thứ tự đề gốc). rate = điểm trung bình của câu (0..1) trên số người trả lời.
+ * - SINGLE: picked = số người chọn phương án.
+ * - TRUE_FALSE: picked = số người đánh đúng nhận định đó.
+ * - SHORT: responses = các câu trả lời khác nhau (gộp theo nội dung chuẩn hóa), nhiều nhất trước.
+ */
 export function questionStats(questions: QInput[], answers: AInput[]) {
   const byQ = new Map<string, AInput[]>();
   for (const a of answers) {
@@ -17,16 +23,37 @@ export function questionStats(questions: QInput[], answers: AInput[]) {
   }
   return questions.map((q, i) => {
     const list = byQ.get(q.id) ?? [];
-    const correct = list.filter((a) => a.isCorrect).length;
+    const credits = list.map(creditOf);
+    const picked = (o: QInput["options"][number]) =>
+      q.type === "TRUE_FALSE"
+        ? list.filter((a) => ((a.marks ?? {}) as Record<string, boolean>)[o.id] === o.isCorrect).length
+        : q.type === "SINGLE"
+          ? list.filter((a) => a.optionId === o.id).length
+          : 0;
     return {
       index: i + 1,
+      id: q.id,
+      type: q.type,
       content: q.content,
       answered: list.length,
-      correct,
-      rate: list.length ? correct / list.length : null,
-      options: q.options.map((o) => ({ content: o.content, isCorrect: o.isCorrect, picked: list.filter((a) => a.optionId === o.id).length })),
+      correct: credits.filter((c) => c >= 1).length,
+      rate: list.length ? credits.reduce((a, b) => a + b, 0) / list.length : null,
+      options: q.options.map((o) => ({ content: o.content, isCorrect: o.isCorrect, picked: picked(o) })),
+      responses: q.type === "SHORT" ? groupResponses(list) : [],
     };
   });
+}
+
+function groupResponses(list: AInput[]) {
+  const groups = new Map<string, { text: string; normalized: string; count: number; accepted: boolean }>();
+  for (const a of list) {
+    const normalized = normalizeShort(a.text ?? "");
+    if (!normalized) continue;
+    const g = groups.get(normalized);
+    if (g) g.count++;
+    else groups.set(normalized, { text: (a.text ?? "").trim(), normalized, count: 1, accepted: creditOf(a) >= 1 });
+  }
+  return [...groups.values()].sort((a, b) => b.count - a.count || a.text.localeCompare(b.text, "vi"));
 }
 
 /** Các câu có tỉ lệ đúng thấp nhất (bỏ qua câu chưa ai trả lời). */

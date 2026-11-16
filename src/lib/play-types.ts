@@ -1,9 +1,21 @@
-export type PlayQuestion = { id: string; content: string; options: { id: string; content: string }[] };
+import type { QuestionType, Response } from "./question-types";
+
+/**
+ * Câu hỏi gửi xuống điện thoại (không kèm đáp án đúng).
+ * SINGLE: options là phương án (đã đảo) · TRUE_FALSE: options là nhận định a–d · SHORT: options rỗng.
+ */
+export type PlayQuestion = { id: string; type: QuestionType; content: string; options: { id: string; content: string }[] };
 
 export type ReviewItem = {
+  type: QuestionType;
   content: string;
   points: number;
-  options: { id: string; content: string; isCorrect: boolean; chosen: boolean }[];
+  /** Tỉ lệ điểm đạt được 0..1. */
+  credit: number;
+  /** SINGLE: chosen = đã chọn · TRUE_FALSE: isCorrect = nhận định Đúng, mark = học viên đánh · SHORT: đáp án được chấp nhận. */
+  options: { id: string; content: string; isCorrect: boolean; chosen: boolean; mark?: boolean | null }[];
+  /** SHORT: nội dung học viên đã gõ. */
+  text?: string | null;
 };
 
 export type PlayState =
@@ -31,8 +43,8 @@ export type PlayState =
       total: number;
       /** Toàn bộ câu hỏi theo thứ tự đã đảo riêng cho học viên này (không kèm đáp án đúng). */
       questions: PlayQuestion[];
-      /** Đáp án đã lưu: questionId → optionId. */
-      chosen: Record<string, string>;
+      /** Câu trả lời đã lưu theo questionId. */
+      chosen: Record<string, Response>;
     }
   | {
       kind: "result";

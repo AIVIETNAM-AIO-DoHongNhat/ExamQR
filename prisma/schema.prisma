@@ -33,13 +33,21 @@ model Exam {
   @@index([teacherId])
 }
 
+enum QuestionType {
+  SINGLE /// trắc nghiệm một đáp án đúng
+  TRUE_FALSE /// một câu dẫn kèm 4 nhận định Đúng/Sai
+  SHORT /// trả lời ngắn, so khớp với các đáp án được chấp nhận
+}
+
 model Question {
-  id      String   @id @default(cuid())
+  id      String       @id @default(cuid())
   examId  String
-  exam    Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  exam    Exam         @relation(fields: [examId], references: [id], onDelete: Cascade)
   order   Int
+  type    QuestionType @default(SINGLE)
   content String
-  points  Int      @default(1)
+  points  Int          @default(1)
+  /// SINGLE: phương án · TRUE_FALSE: nhận định (isCorrect = Đúng) · SHORT: đáp án được chấp nhận
   options Option[]
   answers Answer[]
 
@@ -131,9 +139,17 @@ model Answer {
   participant   Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
   questionId    String
   question      Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
-  optionId      String
-  option        Option      @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  /// SINGLE: phương án đã chọn
+  optionId      String?
+  option        Option?     @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  /// TRUE_FALSE: { [optionId]: true (Đúng) | false (Sai) }
+  marks         Json?
+  /// SHORT: nội dung học viên gõ
+  text          String?
+  /// Đúng hoàn toàn (credit = 1)
   isCorrect     Boolean
+  /// Tỉ lệ điểm đạt được 0..1; null ở bản ghi cũ (khi đó dùng isCorrect)
+  credit        Float?
   answeredAt    DateTime    @default(now())
 
   @@unique([participantId, questionId])
