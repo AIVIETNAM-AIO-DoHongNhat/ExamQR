@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Supabase pooler (port 6543, ?pgbouncer=true) cho runtime serverless
+  url       = env("DATABASE_URL")
+  // Kết nối trực tiếp (port 5432) cho migration
+  directUrl = env("DIRECT_URL")
+}
+
+model Teacher {
+  id        String   @id // trùng id người dùng Supabase Auth
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  exams     Exam[]
+  classes   Class[]
+}
+
+model Exam {
+  id          String     @id @default(cuid())
+  teacherId   String
+  teacher     Teacher    @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  title       String
+  durationMin Int        @default(15)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  questions   Question[]
+  sessions    Session[]
+
+  @@index([teacherId])
+}
+
+model Question {
+  id      String   @id @default(cuid())
+  examId  String
+  exam    Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  order   Int
+  content String
+  points  Int      @default(1)
+  options Option[]
+  answers Answer[]
+
+  @@index([examId])
+}
+
+model Option {
+  id         String   @id @default(cuid())
+  questionId String
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  order      Int
+  content    String
+  isCorrect  Boolean  @default(false)
+  answers    Answer[]
+
+  @@index([questionId])
+}
+
+/// Lớp chỉ lưu mã lớp và danh sách số báo danh – không lưu họ tên học viên.
+model Class {
+  id        String    @id @default(cuid())
+  teacherId String
+  teacher   Teacher   @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  code      String
+  createdAt DateTime  @default(now())
+  students  Student[]
+  sessions  Session[]
+
+  @@index([teacherId])
+}
+
+model Student {
+  id           String        @id @default(cuid())
+  classId      String
+  class        Class         @relation(fields: [classId], references: [id], onDelete: Cascade)
+  sbd          String
+  participants Participant[]
+
+  @@unique([classId, sbd])
+}
+
+enum SessionStatus {
+  LOBBY
+  RUNNING
+  ENDED
+}
+
+model Session {
+  id           String        @id @default(uuid())
+  examId       String
+  exam         Exam          @relation(fields: [examId], references: [id], onDelete: Cascade)
+  classId      String
+  class        Class         @relation(fields: [classId], references: [id], onDelete: Cascade)
+  code         String        @unique
+  status       SessionStatus @default(LOBBY)
+  allowLate    Boolean       @default(false)
+  createdAt    DateTime      @default(now())
+  startedAt    DateTime?
+  endsAt       DateTime?
+  endedAt      DateTime?
+  participants Participant[]
+
+  @@index([examId])
+  @@index([classId])
+}
+
+model Participant {
+  id            String    @id @default(cuid())
+  sessionId     String
+  session       Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  studentId     String
+  student       Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  /// sha256 của nonce trong cookie thiết bị; null = giáo viên cho phép vào lại từ thiết bị khác
+  tokenHash     String?
+  seed          Int
+  answeredCount Int       @default(0)
+  correctCount  Int       @default(0)
+  score         Float?
+  joinedAt      DateTime  @default(now())
+  finishedAt    DateTime?
+  answers       Answer[]
+
+  @@unique([sessionId, studentId])
+}
+
+model Answer {
+  id            String      @id @default(cuid())
+  participantId String
+  participant   Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  questionId    String
+  question      Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  optionId      String
+  option        Option      @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  isCorrect     Boolean
+  answeredAt    DateTime    @default(now())
+
+  @@unique([participantId, questionId])
+}

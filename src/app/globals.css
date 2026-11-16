@@ -1,0 +1,186 @@
+@import "tailwindcss";
+
+@theme {
+  /* Nền và chữ: chàm rất đậm làm màu mực và màu viền pixel */
+  --color-paper: #f4f5fb;
+  --color-surface: #ffffff;
+  --color-ink: #1a1d3a;
+  --color-ink-soft: #3b3f63;
+  --color-muted: #585d80;
+  --color-line: rgb(26 29 58 / 0.12);
+  --color-line-strong: rgb(26 29 58 / 0.28);
+
+  /* Thanh đầu trang */
+  --color-ink-deep: #1f2560;
+  --color-on-dark: #f4f5ff;
+  --color-on-dark-muted: #b9beef;
+
+  /* Điểm nhấn: chàm tươi */
+  --color-accent: #4255ff;
+  --color-accent-hover: #3343d6;
+  --color-accent-soft: #e6e9ff;
+
+  /* Vàng: chỉ làm nền khối, chữ trên vàng luôn dùng ink */
+  --color-sun: #ffcd1f;
+  --color-sun-soft: #fff4c7;
+  /* Ngọc: trạng thái đã vào, đã nộp */
+  --color-mint: #23b893;
+  --color-mint-soft: #d9f6ee;
+
+  /* Trạng thái */
+  --color-ok: #127a59;
+  --color-ok-soft: #d9f6ee;
+  --color-warn: #9a5800;
+  --color-warn-soft: #fff1d3;
+  --color-danger: #c62a35;
+  --color-danger-soft: #ffe5e7;
+
+  --font-sans: var(--font-bvp), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-handjet), var(--font-bvp), ui-sans-serif, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/*
+ * Thẻ pixel: viền 3px góc khuyết (kiểu khung game 8-bit) dựng bằng 4 bóng cứng,
+ * cộng một dải đổ bóng phẳng phía dưới. Bóng nằm ngoài hộp nên khung cha cần chừa ~10px.
+ */
+@utility px-card {
+  background-color: var(--color-surface);
+  border: 0;
+  border-radius: 0;
+  box-shadow:
+    0 -3px 0 0 var(--color-ink),
+    0 3px 0 0 var(--color-ink),
+    -3px 0 0 0 var(--color-ink),
+    3px 0 0 0 var(--color-ink),
+    0 9px 0 0 rgb(26 29 58 / 0.16);
+}
+
+/* Ô pixel nhỏ: viền thật nên không bị cắt trong khung cuộn; đáy dày tạo khối. */
+@utility px-tile {
+  border: 2px solid var(--color-ink);
+  border-bottom-width: 4px;
+  border-radius: 0;
+}
+
+/* Nút nhấn lún: viền mực, bóng cứng phía dưới, bấm thì dịch xuống và mất bóng. */
+@utility px-press {
+  border: 2px solid var(--color-ink);
+  border-radius: 0;
+  box-shadow:
+    inset 0 -4px 0 0 rgb(0 0 0 / 0.2),
+    0 3px 0 0 var(--color-ink);
+  &:active {
+    transform: translateY(3px);
+    box-shadow: inset 0 -2px 0 0 rgb(0 0 0 / 0.2);
+  }
+}
+
+/* Thanh đầu trang tối, đặc, kẻ dưới dày. */
+@utility px-bar {
+  background-color: var(--color-ink-deep);
+  border-bottom: 4px solid var(--color-ink);
+}
+
+/* Phần tô của thanh tiến độ, cắt thành ô vuông. */
+@utility px-meter {
+  -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 10px, transparent 10px 13px);
+  mask-image: repeating-linear-gradient(90deg, #000 0 10px, transparent 10px 13px);
+}
+
+/* Rãnh của thanh tiến độ. */
+@utility px-track {
+  background-color: var(--color-surface);
+  border: 2px solid var(--color-ink);
+  padding: 2px;
+}
+
+html,
+body {
+  color: var(--color-ink);
+}
+
+body {
+  -webkit-tap-highlight-color: transparent;
+  background-color: var(--color-paper);
+  /* Lưới chấm vuông rất nhạt, gợi lưới điểm ảnh */
+  background-image:
+    linear-gradient(rgb(26 29 58 / 0.05) 2px, transparent 2px),
+    linear-gradient(90deg, rgb(26 29 58 / 0.05) 2px, transparent 2px);
+  background-size: 24px 24px;
+  background-position: -1px -1px;
+}
+
+/* Handjet hẹp và thấp: giãn chữ nhẹ để dễ đọc. */
+.font-display {
+  letter-spacing: 0.02em;
+}
+
+/* Cỡ chữ gốc trên điện thoại học viên (TextSizeToggle đặt data-fs); Tailwind tính theo rem nên toàn trang co giãn theo. */
+html[data-fs="base"] {
+  font-size: 17px;
+}
+html[data-fs="lg"] {
+  font-size: 19px;
+}
+html[data-fs="xl"] {
+  font-size: 21px;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-sun);
+  outline-offset: 3px;
+}
+
+dialog::backdrop {
+  background-color: rgb(26 29 58 / 0.55);
+  background-image: linear-gradient(45deg, rgb(255 255 255 / 0.04) 25%, transparent 25%, transparent 75%, rgb(255 255 255 / 0.04) 75%);
+  background-size: 8px 8px;
+}
+
+/* Ô trên màn chiếu nháy viền khi học viên vừa trả lời thêm một câu */
+@keyframes cell-pulse {
+  0% {
+    outline: 4px solid var(--color-sun);
+    outline-offset: 0;
+  }
+  100% {
+    outline: 4px solid transparent;
+    outline-offset: 6px;
+  }
+}
+.cell-pulse {
+  animation: cell-pulse 0.7s steps(5) both;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff;
+  }
+  .px-card {
+    box-shadow: none !important;
+    border: 1px solid #c9cbe0 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  .print-break-avoid {
+    break-inside: avoid;
+  }
+}
+.print-only {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
