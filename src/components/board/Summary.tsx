@@ -17,7 +17,8 @@ export function Summary({ state }: { state: BoardState }) {
   const absent = state.roster.length - state.participants.length;
 
   return (
-    <div className="flex h-full flex-col gap-6 overflow-hidden p-6 2xl:p-8">
+    // Màn hình thấp (hoặc phóng to nhiều) thì cuộn được thay vì để các khung đè lên nhau.
+    <div className="flex h-full flex-col gap-6 overflow-y-auto p-6 2xl:p-8">
       <div className="px-card mx-1 mt-1 grid shrink-0 grid-cols-4 divide-x-2 divide-ink">
         <Stat label="Điểm trung bình" value={fmtScore(s.avg == null ? null : Math.round(s.avg * 100) / 100)} accent />
         <Stat label={`Tỉ lệ đạt (từ ${PASS_SCORE} điểm)`} value={pct(s.passRate)} />
@@ -26,7 +27,7 @@ export function Summary({ state }: { state: BoardState }) {
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-[1fr_1.15fr] gap-6">
-        <section className="px-card m-1 flex min-h-0 flex-col p-6">
+        <section className="px-card m-1 flex min-h-0 flex-col overflow-y-auto p-6">
           <h3 className="font-display text-[clamp(2rem,2.6vw,2.6rem)] font-bold leading-none text-ink">Biểu dương</h3>
           <p className="mt-1 text-[15px] text-muted">
             {honor.kind === "honor" && `Học viên đạt từ ${HONOR_SCORE} điểm trở lên, xếp theo số báo danh`}
@@ -45,8 +46,9 @@ export function Summary({ state }: { state: BoardState }) {
           {honor.more > 0 && <p className="mt-3 text-[15px] text-muted">và {honor.more} học viên khác</p>}
         </section>
 
+        {/* Phổ điểm luôn giữ đủ chỗ cho biểu đồ; khi thiếu chỗ thì danh sách câu bên dưới co lại và cuộn. */}
         <div className="flex min-h-0 flex-col gap-6">
-          <section className="px-card m-1 flex min-h-0 flex-1 flex-col p-6">
+          <section className="px-card m-1 flex min-h-64 flex-1 flex-col p-6">
             <div className="flex items-baseline justify-between gap-4">
               <h3 className="font-display text-[clamp(2rem,2.6vw,2.6rem)] font-bold leading-none text-ink">Phổ điểm</h3>
               <span className="flex items-center gap-4 text-[13px] text-muted">
@@ -62,8 +64,9 @@ export function Summary({ state }: { state: BoardState }) {
           </section>
 
           {state.hardest && state.hardest.length > 0 && (
-            <section className="px-card m-1 shrink-0">
-              <h3 className="px-6 pb-3 pt-5 font-display text-[clamp(1.7rem,2.2vw,2.2rem)] font-bold leading-none text-ink">Câu cần trao đổi thêm</h3>
+            <section className="px-card m-1 flex min-h-40 flex-col">
+              <h3 className="shrink-0 px-6 pb-3 pt-5 font-display text-[clamp(1.7rem,2.2vw,2.2rem)] font-bold leading-none text-ink">Câu cần trao đổi thêm</h3>
+              <div className="min-h-0 flex-1 overflow-y-auto">
               <table className="w-full">
                 <tbody>
                   {state.hardest.map((q) => (
@@ -79,6 +82,7 @@ export function Summary({ state }: { state: BoardState }) {
                   ))}
                 </tbody>
               </table>
+              </div>
             </section>
           )}
         </div>
