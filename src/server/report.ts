@@ -2,9 +2,19 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import { compareSbd } from "@/lib/sbd";
 import { questionStats, scoreSummary } from "@/lib/stats";
+import { GRACE_MS, closeSession } from "./grading";
 
 /** Số liệu báo cáo của một buổi; null nếu không thuộc giảng viên này. */
 export async function loadReport(sessionId: string, teacherId: string) {
+  // Màn chiếu tự kết thúc phiên khi hết giờ; nếu giảng viên đã đóng màn chiếu thì chốt tại đây
+  // để báo cáo không còn bài "Chưa nộp" và điểm trống.
+  const head = await prisma.session.findFirst({
+    where: { id: sessionId, exam: { teacherId } },
+    select: { id: true, examId: true, status: true, endsAt: true },
+  });
+  if (!head) return null;
+  if (head.status === "RUNNING" && head.endsAt && Date.now() > head.endsAt.getTime() + GRACE_MS) await closeSession(head);
+
   const s = await prisma.session.findFirst({
     where: { id: sessionId, exam: { teacherId } },
     include: {

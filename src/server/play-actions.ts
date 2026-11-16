@@ -4,7 +4,7 @@ import { cookies, headers } from "next/headers";
 import { randomInt } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { broadcast } from "@/lib/realtime";
-import { normalizeSbd } from "@/lib/sbd";
+import { matchSbd, normalizeSbd } from "@/lib/sbd";
 import { deriveSeed, seededShuffle, shuffleWithinRuns } from "@/lib/shuffle";
 import { cookieName, hashNonce, newNonce, signParticipant, verifyParticipant } from "@/lib/token";
 import type { AnswerResult, JoinResult, PlayState } from "@/lib/play-types";
@@ -44,7 +44,8 @@ async function buildState(s: SessionRow, p: ParticipantRow | null): Promise<Play
 
   if (!p) {
     if (s.status === "ENDED") return { kind: "closed", examTitle: s.exam.title };
-    if (s.status === "RUNNING" && !s.allowLate) return { kind: "closed", examTitle: s.exam.title };
+    // Khi đang làm bài vẫn hiện ô nhập SBD (kể cả khi không cho vào muộn) để học viên được
+    // giảng viên "cho vào lại" có thể vào từ máy mới; người vào muộn sẽ nhận thông báo từ joinSession.
     return { kind: "join", code: s.code, examTitle: s.exam.title, status: s.status };
   }
 
@@ -145,7 +146,9 @@ export async function getPlayState(code: string): Promise<PlayState> {
 
 export async function joinSession(code: string, rawSbd: string): Promise<JoinResult> {
   const ip = await clientIp();
-  if (!rateLimit(`join:${ip}`, 20, 60_000)) return { ok: false, error: "Thử quá nhiều lần, vui lòng đợi một phút" };
+  // Cả lớp thường dùng chung một IP công khai (cùng Wi-Fi hoặc NAT của nhà mạng),
+  // nên ngưỡng phải đủ cho cả lớp cùng vào trong một phút; chỉ nhằm chặn dò SBD hàng loạt.
+  if (!rateLimit(`join:${ip}`, 300, 60_000)) return { ok: false, error: "Thử quá nhiều lần, vui lòng đợi một phút" };
 
   const s = await findSession(code);
   if (!s) return { ok: false, error: "Không tìm thấy phòng" };
@@ -154,12 +157,13 @@ export async function joinSession(code: string, rawSbd: string): Promise<JoinRes
   if (existing) return { ok: true, state: await buildState(s, existing) };
 
   if (s.status === "ENDED") return { ok: false, error: "Phòng đã kết thúc" };
-  if (s.status === "RUNNING" && !s.allowLate) return { ok: false, error: "Bài kiểm tra đã bắt đầu. Đồng chí vui lòng báo giảng viên." };
 
-  const sbd = normalizeSbd(rawSbd);
-  if (!sbd) return { ok: false, error: "Nhập số báo danh" };
-  const student = await prisma.student.findUnique({ where: { classId_sbd: { classId: s.classId, sbd } } });
-  if (!student) return { ok: false, error: `Số báo danh ${sbd} không có trong danh sách lớp` };
+  const typed = normalizeSbd(rawSbd);
+  if (!typed) return { ok: false, error: "Nhập số báo danh" };
+  const roster = await prisma.student.findMany({ where: { classId: s.classId }, select: { id: true, sbd: true } });
+  const student = matchSbd(roster, typed);
+  if (!student) return { ok: false, error: `Số báo danh ${typed} không có trong danh sách lớp` };
+  const sbd = student.sbd;
 
   const nonce = newNonce();
   const tokenHash = hashNonce(nonce);
@@ -172,6 +176,7 @@ export async function joinSession(code: string, rawSbd: string): Promise<JoinRes
     if (claimed.count === 0) return { ok: false, error: `Số báo danh ${sbd} đã được dùng trên thiết bị khác. Nếu không phải đồng chí, vui lòng báo giảng viên.` };
     pid = prior.id;
   } else {
+    if (s.status === "RUNNING" && !s.allowLate) return { ok: false, error: "Bài kiểm tra đã bắt đầu. Đồng chí vui lòng báo giảng viên." };
     try {
       const p = await prisma.participant.create({
         data: { sessionId: s.id, studentId: student.id, tokenHash, seed: randomInt(1, 2 ** 31 - 1) },

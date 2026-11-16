@@ -1,7 +1,43 @@
 import "server-only";
+import type { SessionStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { broadcast } from "@/lib/realtime";
 import { computeScore } from "@/lib/scoring";
 import { creditOf } from "@/lib/question-types";
+
+/**
+ * Chốt điểm mọi bài chưa nộp của một phiên. Đọc đề và bài làm một lần rồi ghi từng người
+ * (thay vì gọi finalizeParticipant từng người: ~4 truy vấn/người, chậm khi lớp đông).
+ */
+export async function finalizeSession(sessionId: string, examId: string) {
+  const [questions, pending] = await Promise.all([
+    prisma.question.findMany({ where: { examId }, select: { id: true, points: true } }),
+    prisma.participant.findMany({
+      where: { sessionId, finishedAt: null },
+      select: { id: true, answers: { select: { questionId: true, isCorrect: true, credit: true } } },
+    }),
+  ]);
+  const at = new Date();
+  for (const p of pending) {
+    const { score, correct } = computeScore(questions, p.answers.map((a) => ({ questionId: a.questionId, credit: creditOf(a) })));
+    await prisma.participant.updateMany({ where: { id: p.id, finishedAt: null }, data: { score, correctCount: correct, finishedAt: at } });
+  }
+}
+
+/** Kết thúc phiên và chốt điểm người chưa nộp. Gọi lại nhiều lần vẫn an toàn. */
+export async function closeSession(s: { id: string; examId: string; status: SessionStatus }) {
+  let changed = false;
+  if (s.status !== "ENDED") {
+    const now = new Date();
+    const res = await prisma.session.updateMany({
+      where: { id: s.id, status: { not: "ENDED" } },
+      data: { status: "ENDED", endedAt: now, ...(s.status === "LOBBY" ? { startedAt: now, endsAt: now } : {}) },
+    });
+    changed = res.count > 0;
+  }
+  await finalizeSession(s.id, s.examId);
+  if (changed) await broadcast(s.id, { type: "session:ended" });
+}
 
 /** Tính lại điểm các bài đã chốt (sau khi giảng viên chấm lại câu trả lời ngắn). */
 export async function rescoreParticipants(examId: string, participantIds: string[]) {

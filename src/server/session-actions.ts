@@ -6,7 +6,7 @@ import { compareSbd } from "@/lib/sbd";
 import { hardestQuestions, questionStats } from "@/lib/stats";
 import type { BoardState } from "@/lib/board-types";
 import { requireTeacher } from "./auth";
-import { COUNTDOWN_MS, finalizeParticipant } from "./grading";
+import { COUNTDOWN_MS, closeSession } from "./grading";
 
 async function ownSession(sessionId: string) {
   const t = await requireTeacher();
@@ -85,15 +85,7 @@ export async function startSession(sessionId: string) {
 /** Kết thúc phiên: chốt điểm cho tất cả người chưa nộp. Gọi lại nhiều lần vẫn an toàn. */
 export async function endSession(sessionId: string) {
   const s = await ownSession(sessionId);
-  if (s.status !== "ENDED") {
-    await prisma.session.update({
-      where: { id: s.id },
-      data: { status: "ENDED", endedAt: new Date(), ...(s.status === "LOBBY" ? { startedAt: new Date(), endsAt: new Date() } : {}) },
-    });
-  }
-  const pending = await prisma.participant.findMany({ where: { sessionId, finishedAt: null }, select: { id: true } });
-  for (const p of pending) await finalizeParticipant(p.id);
-  if (s.status !== "ENDED") await broadcast(s.id, { type: "session:ended" });
+  await closeSession(s);
   return getBoardState(sessionId);
 }
 
