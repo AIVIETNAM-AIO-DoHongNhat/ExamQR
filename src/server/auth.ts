@@ -10,16 +10,21 @@ export const getTeacher = cache(async () => {
   // Chưa cấu hình: coi như chưa đăng nhập; trang /login sẽ hiện hướng dẫn cấu hình.
   if (missingEnv().length) return null;
   const supabase = await supabaseServer();
-  const { data } = await supabase.auth.getUser();
-  const user = data.user;
-  if (!user?.email) return null;
+  // Xác thực JWT tại chỗ thay vì gọi máy chủ Auth (getUser) ở mỗi lần render.
+  const { data } = await supabase.auth.getClaims();
+  const claims = data?.claims;
+  if (!claims?.sub || !claims.email) return null;
+
+  // Chỉ đọc; ghi khi lần đầu đăng nhập. (upsert cũ là một lệnh ghi ở mỗi lần chuyển trang.)
+  const existing = await prisma.teacher.findUnique({ where: { id: claims.sub } });
+  if (existing) return existing;
   return prisma.teacher.upsert({
-    where: { id: user.id },
+    where: { id: claims.sub },
     update: {},
     create: {
-      id: user.id,
-      email: user.email,
-      name: (user.user_metadata?.name as string | undefined) ?? null,
+      id: claims.sub,
+      email: claims.email,
+      name: (claims.user_metadata?.name as string | undefined) ?? null,
     },
   });
 });

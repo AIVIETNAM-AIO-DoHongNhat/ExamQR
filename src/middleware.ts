@@ -25,7 +25,10 @@ export async function middleware(request: NextRequest) {
     },
   );
 
-  const { data } = await supabase.auth.getUser();
+  // getClaims xác thực chữ ký JWT ngay tại chỗ (khoá công khai JWKS được cache),
+  // không gọi tới máy chủ Auth mỗi lần chuyển trang như getUser. Token hết hạn thì tự làm mới.
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const data = { user: claimsData?.claims ?? null };
   const path = request.nextUrl.pathname;
 
   if (!data.user && TEACHER_PREFIXES.some((p) => path.startsWith(p))) {
